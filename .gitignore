@@ -21,6 +21,7 @@ pnpm-debug.log*
 
 # Next.js cache
 .next/cache/
+.next/
 
 # Optional npm cache directory
 .npm/
