@@ -1,64 +1,92 @@
+// src/components/wheel/DiscountWheel.tsx
+
 'use client'
 
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
+import { useWheel } from '@/hooks/useIntelcobro'
+import { WheelResult } from '@/types/wheel'
+import { DEFAULT_WHEEL_SECTIONS, WHEEL_ANIMATION } from '@/types/wheel'
 
 interface DiscountWheelProps {
-  onResult: (result: any) => void
+  onResult?: (result: WheelResult) => void
+  onSpin?: () => void
+  disabled?: boolean
+  size?: number
 }
 
-export const DiscountWheel = ({ onResult }: DiscountWheelProps) => {
-  const [isSpinning, setIsSpinning] = useState(false)
+export const DiscountWheel: React.FC<DiscountWheelProps> = ({
+  onResult,
+  onSpin,
+  disabled = false,
+  size = 220
+}) => {
   const [rotation, setRotation] = useState(0)
-  const [hasSpun, setHasSpun] = useState(false)
+  const [wheelSize, setWheelSize] = useState(size)
   const wheelRef = useRef<HTMLDivElement>(null)
+  const { spin, isSpinning, hasSpun, lastResult } = useWheel()
 
-  const sections = [
-    { id: 1, label: '5% OFF', angle: 0, color: '#D62336' },
-    { id: 2, label: 'Sin premio', angle: 60, color: '#798553' }, // Esta es la sección ganadora
-    { id: 3, label: '10% OFF', angle: 120, color: '#D62336' },
-    { id: 4, label: 'Sin premio', angle: 180, color: '#6b7280' },
-    { id: 5, label: '20% OFF', angle: 240, color: '#798553' },
-    { id: 6, label: '15% OFF', angle: 300, color: '#6b7280' },
-  ]
+  // Ajustar tamaño según el contenedor
+  useEffect(() => {
+    const updateSize = () => {
+      if (wheelRef.current) {
+        const container = wheelRef.current.parentElement
+        if (container) {
+          const containerWidth = container.clientWidth
+          const containerHeight = container.clientHeight
+          const maxSize = Math.min(containerWidth - 40, containerHeight - 100, size)
+          setWheelSize(Math.max(180, maxSize)) // Mínimo 180px
+        }
+      }
+    }
 
-  const spinWheel = async () => {
-    if (isSpinning || hasSpun) return
+    updateSize()
+    window.addEventListener('resize', updateSize)
+    return () => window.removeEventListener('resize', updateSize)
+  }, [size])
 
-    setIsSpinning(true)
-    setHasSpun(true)
-    
-    // Calcular rotación para que SIEMPRE caiga en 10% OFF (sección 2, ángulo 60)
-    const targetAngle = 280 // Ángulo de la sección "10% OFF"
-    const spins = 3
-    
-    // Calcular el ángulo final para que la flecha apunte al 10% OFF
-    // La flecha está en la parte superior (0 grados), necesitamos que apunte a 60 grados
-    const finalAngle = 360 - targetAngle + (Math.random() * 10 - 5) // Pequeña variación para naturalidad
-    const totalRotation = rotation + (spins * 360) + finalAngle
+  const handleSpin = async () => {
+    if (isSpinning || hasSpun || disabled) return
 
-    setRotation(totalRotation)
+    onSpin?.()
 
     try {
-      setTimeout(() => {
-        // Siempre devolver resultado de 10% OFF
-        const result = {
-          id: Date.now().toString(),
-          section: '10% OFF',
-          discount: 10,
-          isWinning: true,
-          message: '¡Felicitaciones! Ganaste 10% OFF',
-          angle: finalAngle,
-          spinDuration: 3000
-        }
+      // Calculate rotation for guaranteed 10% OFF result
+      const targetSectionAngle = 120 // 10% OFF section angle
+      const spins = Math.floor(Math.random() * 3) + WHEEL_ANIMATION.MIN_SPINS
+      const randomOffset = Math.random() * 10 - 5 // Small random variation
+      
+      // Calculate final angle to land on 10% OFF
+      const finalAngle = 360 - targetSectionAngle + randomOffset
+      const totalRotation = rotation + (spins * 360) + finalAngle
 
-        setIsSpinning(false)
-        if (onResult) {
-          onResult(result)
-        }
-      }, 3000)
+      setRotation(totalRotation)
+
+      // Call backend API - this already returns mapped WheelResult
+      const result = await spin()
+      
+      // The result is already mapped by useWheel hook
+      if (result) {
+        // Delay result callback to match animation
+        setTimeout(() => {
+          onResult?.(result)
+        }, WHEEL_ANIMATION.SPIN_DURATION)
+      }
+
     } catch (error) {
       console.error('Error spinning wheel:', error)
-      setIsSpinning(false)
+      
+      // Fallback result
+      const fallbackResult: WheelResult = {
+        id: Date.now().toString(),
+        section: '10% OFF',
+        discount: 10,
+        isWinning: true,
+        message: '¡Felicitaciones! Ganaste 10% OFF'
+      }
+
+      setTimeout(() => {
+        onResult?.(fallbackResult)
+      }, WHEEL_ANIMATION.SPIN_DURATION)
     }
   }
 
@@ -67,27 +95,36 @@ export const DiscountWheel = ({ onResult }: DiscountWheelProps) => {
       display: 'flex', 
       flexDirection: 'column', 
       alignItems: 'center', 
-      gap: '1.5rem',
-      padding: '1rem'
+      gap: 'clamp(0.75rem, 2vw, 1.5rem)',
+      padding: '0.5rem',
+      width: '100%',
+      maxWidth: '100%'
     }}>
-      <div style={{ position: 'relative', width: '280px', height: '280px' }}>
+      <div style={{ 
+        position: 'relative', 
+        width: `${wheelSize}px`, 
+        height: `${wheelSize}px`,
+        flexShrink: 0
+      }}>
         {/* Wheel Container */}
         <div
           ref={wheelRef}
           style={{
-            width: '280px',
-            height: '280px',
+            width: `${wheelSize}px`,
+            height: `${wheelSize}px`,
             borderRadius: '50%',
             position: 'relative',
             transform: `rotate(${rotation}deg)`,
-            transition: isSpinning ? 'transform 3s cubic-bezier(0.23, 1, 0.32, 1)' : 'none',
+            transition: isSpinning 
+              ? `transform ${WHEEL_ANIMATION.SPIN_DURATION}ms ${WHEEL_ANIMATION.EASING}` 
+              : 'none',
             background: 'conic-gradient(from 0deg, #D62336 0deg 60deg, #798553 60deg 120deg, #D62336 120deg 180deg, #6b7280 180deg 240deg, #798553 240deg 300deg, #6b7280 300deg 360deg)',
-            border: '5px solid white',
+            border: `${Math.max(3, wheelSize * 0.018)}px solid white`,
             boxShadow: '0 0 20px rgba(0, 0, 0, 0.3)'
           }}
         >
           {/* Wheel Sections with Text */}
-          {sections.map((section, index) => (
+          {DEFAULT_WHEEL_SECTIONS.map((section, index) => (
             <div
               key={section.id}
               style={{
@@ -96,8 +133,8 @@ export const DiscountWheel = ({ onResult }: DiscountWheelProps) => {
                 left: '50%',
                 transformOrigin: '0 0',
                 transform: `rotate(${section.angle + 30}deg)`,
-                width: '140px',
-                height: '140px',
+                width: `${wheelSize / 2}px`,
+                height: `${wheelSize / 2}px`,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -107,17 +144,17 @@ export const DiscountWheel = ({ onResult }: DiscountWheelProps) => {
               <span style={{
                 color: 'white',
                 fontWeight: 'bold',
-                fontSize: '0.8rem',
+                fontSize: `${wheelSize * 0.025}rem`,
                 textShadow: '2px 2px 4px rgba(0,0,0,0.8)',
                 transform: 'rotate(35deg)',
                 whiteSpace: 'nowrap',
                 textAlign: 'center',
                 position: 'absolute',
-                top: '35px',
+                top: `${wheelSize * 0.125}px`,
                 left: '50%',
                 transformOrigin: 'center',
-                marginLeft: '-50px',
-                width: '100px'
+                marginLeft: `${-wheelSize * 0.18}px`,
+                width: `${wheelSize * 0.36}px`
               }}>
                 {section.label}
               </span>
@@ -128,14 +165,14 @@ export const DiscountWheel = ({ onResult }: DiscountWheelProps) => {
         {/* Wheel Pointer */}
         <div style={{
           position: 'absolute',
-          top: '-12px',
+          top: `${-wheelSize * 0.043}px`,
           left: '50%',
           transform: 'translateX(-50%) rotate(-60deg)',
           width: '0',
           height: '0',
-          borderLeft: '15px solid transparent',
-          borderRight: '15px solid transparent',
-          borderBottom: '25px solid white',
+          borderLeft: `${wheelSize * 0.054}px solid transparent`,
+          borderRight: `${wheelSize * 0.054}px solid transparent`,
+          borderBottom: `${wheelSize * 0.089}px solid white`,
           zIndex: 10,
           filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))'
         }} />
@@ -146,17 +183,17 @@ export const DiscountWheel = ({ onResult }: DiscountWheelProps) => {
           top: '50%',
           left: '50%',
           transform: 'translate(-50%, -50%)',
-          width: '50px',
-          height: '50px',
+          width: `${wheelSize * 0.18}px`,
+          height: `${wheelSize * 0.18}px`,
           backgroundColor: 'var(--primary-dark)',
           borderRadius: '50%',
-          border: '3px solid white',
+          border: `${Math.max(2, wheelSize * 0.014)}px solid white`,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           color: 'white',
           fontWeight: 'bold',
-          fontSize: '1rem',
+          fontSize: `${wheelSize * 0.032}rem`,
           zIndex: 10
         }}>
           🎲
@@ -165,24 +202,72 @@ export const DiscountWheel = ({ onResult }: DiscountWheelProps) => {
 
       {/* Spin Button */}
       <button
-        onClick={spinWheel}
-        disabled={isSpinning || hasSpun}
+        onClick={handleSpin}
+        disabled={isSpinning || hasSpun || disabled}
         style={{
-          backgroundColor: isSpinning || hasSpun ? '#6b7280' : 'var(--primary-green)',
+          backgroundColor: (isSpinning || hasSpun || disabled) ? '#6b7280' : 'var(--primary-green)',
           color: 'white',
           border: 'none',
-          padding: '12px 24px',
+          padding: 'clamp(8px, 2vw, 12px) clamp(16px, 4vw, 24px)',
           borderRadius: '25px',
-          fontSize: '1rem',
+          fontSize: 'clamp(0.8rem, 2.5vw, 1rem)',
           fontWeight: 'bold',
-          cursor: isSpinning || hasSpun ? 'not-allowed' : 'pointer',
+          cursor: (isSpinning || hasSpun || disabled) ? 'not-allowed' : 'pointer',
           transition: 'all 0.3s ease',
           boxShadow: '0 4px 15px rgba(0, 0, 0, 0.2)',
-          opacity: hasSpun ? 0.6 : 1
+          opacity: (hasSpun || disabled) ? 0.6 : 1,
+          flexShrink: 0
+        }}
+        onMouseEnter={(e) => {
+          if (!isSpinning && !hasSpun && !disabled) {
+            (e.target as HTMLButtonElement).style.transform = 'scale(1.05)'
+          }
+        }}
+        onMouseLeave={(e) => {
+          (e.target as HTMLButtonElement).style.transform = 'scale(1)'
         }}
       >
         {isSpinning ? 'Girando...' : hasSpun ? 'Ya giraste' : '🎯 ¡GIRAR RUEDA!'}
       </button>
+
+      {/* Result Display */}
+      {lastResult && (
+        <div style={{
+          backgroundColor: lastResult.isWinning ? 'var(--primary-green)' : '#6b7280',
+          color: 'white',
+          padding: 'clamp(0.5rem, 2vw, 1rem)',
+          borderRadius: '10px',
+          textAlign: 'center',
+          animation: 'fadeIn 0.5s ease-in',
+          width: '100%',
+          maxWidth: `${wheelSize}px`,
+          flexShrink: 0
+        }}>
+          <h4 style={{ 
+            margin: '0 0 0.25rem 0', 
+            fontSize: 'clamp(0.9rem, 2.5vw, 1.1rem)' 
+          }}>
+            {lastResult.isWinning ? '🎉 ¡Felicidades!' : '😔 ¡Suerte la próxima vez!'}
+          </h4>
+          <p style={{ 
+            margin: '0', 
+            fontSize: 'clamp(0.75rem, 2vw, 0.9rem)',
+            lineHeight: '1.3'
+          }}>
+            {lastResult.message}
+          </p>
+          {lastResult.discount && (
+            <p style={{ 
+              margin: '0.25rem 0 0 0', 
+              fontSize: 'clamp(0.7rem, 1.8vw, 0.8rem)', 
+              opacity: 0.9,
+              lineHeight: '1.2'
+            }}>
+              Menciona este descuento al solicitar tu asesoría
+            </p>
+          )}
+        </div>
+      )}
     </div>
   )
 }
